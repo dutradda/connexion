@@ -4,7 +4,6 @@ import inspect
 import logging
 import re
 
-import flask
 import six
 import werkzeug.exceptions as exceptions
 
@@ -91,24 +90,23 @@ def parameter_to_arg(parameters, consumes, function):
                            for param in parameters if param['in'] == 'formData' and 'default' in param}
 
     @functools.wraps(function)
-    def wrapper(*args, **kwargs):
+    def wrapper(request):
         logger.debug('Function Arguments: %s', arguments)
+        kwargs = {}
 
         if all_json(consumes):
-            try:
-                request_body = flask.request.get_json()
-            except exceptions.BadRequest:
-                request_body = None
+            request_body = request.json
         else:
-            request_body = flask.request.data
+            request_body = request.body
 
         if default_body and not request_body:
             request_body = default_body
 
         # Parse path parameters
+        path_params = request.path_params
         for key, path_param_definitions in path_types.items():
-            if key in kwargs:
-                kwargs[key] = get_val_from_param(kwargs[key],
+            if key in path_params:
+                kwargs[key] = get_val_from_param(path_params[key],
                                                  path_param_definitions)
 
         # Add body parameters
@@ -120,7 +118,7 @@ def parameter_to_arg(parameters, consumes, function):
 
         # Add query parameters
         query_arguments = copy.deepcopy(default_query_params)
-        query_arguments.update({sanitize_param(k): v for k, v in flask.request.args.items()})
+        query_arguments.update({sanitize_param(k): v for k, v in request.query.items()})
         for key, value in query_arguments.items():
             if not has_kwargs and key not in arguments:
                 logger.debug("Query Parameter '%s' not in function arguments", key)
@@ -136,7 +134,7 @@ def parameter_to_arg(parameters, consumes, function):
 
         # Add formData parameters
         form_arguments = copy.deepcopy(default_form_params)
-        form_arguments.update({sanitize_param(k): v for k, v in flask.request.form.items()})
+        form_arguments.update({sanitize_param(k): v for k, v in request.form.items()})
         for key, value in form_arguments.items():
             if not has_kwargs and key not in arguments:
                 logger.debug("FormData parameter '%s' not in function arguments", key)
@@ -150,7 +148,7 @@ def parameter_to_arg(parameters, consumes, function):
                     kwargs[key] = get_val_from_param(value, form_param)
 
         # Add file parameters
-        file_arguments = flask.request.files
+        file_arguments = request.files
         for key, value in file_arguments.items():
             if not has_kwargs and key not in arguments:
                 logger.debug("File parameter (formData) '%s' not in function arguments", key)
@@ -158,6 +156,7 @@ def parameter_to_arg(parameters, consumes, function):
                 logger.debug("File parameter (formData) '%s' in function arguments", key)
                 kwargs[key] = value
 
-        return function(*args, **kwargs)
+        kwargs.update(request.context)
+        return function(**kwargs)
 
     return wrapper
